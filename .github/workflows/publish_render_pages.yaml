@@ -1,0 +1,66 @@
+name: Publish documentation on Render
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'poetry.lock'
+      - 'Dockerfile'
+      - 'email_list.txt'
+      - 'render.yaml'
+
+jobs:
+  publish_documentation_on_render:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.13.1
+
+      - name: Check out repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git user
+        uses: fregante/setup-git-user@v2
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.0.1
+
+      - name: Publish Documentation
+        run: |
+          poetry install
+          MKDOCS_VERSION=$(poetry run mkdocs --version | awk '{print $3}')
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          COMMIT_MESSAGE="Build site $COMMIT_HASH with MkDocs version: $MKDOCS_VERSION"
+          poetry run task build
+          git add -f site/
+          git commit -m "$COMMIT_MESSAGE"
+          git switch --orphan render-pages || true
+          git checkout render-pages || true
+          git pull origin render-pages || true
+          git checkout main site
+          git checkout main .github
+          git checkout main Dockerfile
+          git checkout main email_list.txt
+          git checkout main render.yaml
+          COMMIT_MESSAGE="Deployed render-pages $COMMIT_HASH with MkDocs version: $MKDOCS_VERSION"
+          git commit -am "$COMMIT_MESSAGE"
+          git push origin render-pages
+
+      - name: Workflow failure notification
+        uses: JasonEtco/create-an-issue@v2
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          filename: .github/workflow_publish_render_pages_failure.md
